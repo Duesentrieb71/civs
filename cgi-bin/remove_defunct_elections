@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!@PERL@
 #
 # List and remove all elections with 0 votes cast that are more than a week old.
 #

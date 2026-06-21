@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+local_root="${CIVS_LOCAL_ROOT:-"$repo_root/.civs-local"}"
+port="${CIVS_PORT:-18080}"
+server_root="$local_root/apache"
+conf_file="$server_root/httpd.conf"
+
+if [[ ! -x "$local_root/cgi-bin/create_election.pl" ]]; then
+  echo "Local CIVS install not found. Run scripts/civs-local-install first." >&2
+  exit 1
+fi
+
+httpd_bin="$(command -v httpd)"
+httpd_prefix="$(dirname "$(dirname "$httpd_bin")")"
+modules_dir="$httpd_prefix/modules"
+
+mkdir -p "$server_root" "$server_root/logs" "$server_root/run"
+
+cat > "$conf_file" <<EOF
+ServerRoot "$server_root"
+PidFile "$server_root/run/httpd.pid"
+Listen 127.0.0.1:$port
+ServerName localhost
+ServerAdmin civs-local@example.test
+
+LoadModule mpm_event_module "$modules_dir/mod_mpm_event.so"
+LoadModule unixd_module "$modules_dir/mod_unixd.so"
+LoadModule authn_core_module "$modules_dir/mod_authn_core.so"
+LoadModule authz_core_module "$modules_dir/mod_authz_core.so"
+LoadModule authz_host_module "$modules_dir/mod_authz_host.so"
+LoadModule authz_user_module "$modules_dir/mod_authz_user.so"
+LoadModule access_compat_module "$modules_dir/mod_access_compat.so"
+LoadModule alias_module "$modules_dir/mod_alias.so"
+LoadModule cgi_module "$modules_dir/mod_cgi.so"
+LoadModule dir_module "$modules_dir/mod_dir.so"
+LoadModule env_module "$modules_dir/mod_env.so"
+LoadModule log_config_module "$modules_dir/mod_log_config.so"
+LoadModule mime_module "$modules_dir/mod_mime.so"
+LoadModule negotiation_module "$modules_dir/mod_negotiation.so"
+LoadModule setenvif_module "$modules_dir/mod_setenvif.so"
+
+TypesConfig "$httpd_prefix/conf/mime.types"
+ErrorLog "$server_root/logs/error.log"
+LogFormat "%h %l %u %t \"%r\" %>s %b" common
+CustomLog "$server_root/logs/access.log" common
+
+AddHandler type-map .var
+AddHandler cgi-script .cgi .pl
+AddType text/html .html
+AddCharset UTF-8 .utf8
+DefaultLanguage en
+AddLanguage en .en
+AddLanguage de .de
+AddLanguage fr .fr
+AddLanguage es .es
+AddLanguage uk .uk
+AddLanguage ta .ta
+AddLanguage hi .hi
+AddLanguage ko .ko
+AddLanguage it .it
+AddLanguage nl .nl
+AddLanguage ja .ja
+AddLanguage zh .zh
+AddLanguage hu .hu
+AddLanguage pt .pt
+LanguagePriority en de fr es uk ta hi ko it nl ja zh hu pt
+ForceLanguagePriority Prefer Fallback
+DirectoryIndex index.html.var index.html.en index.html
+
+DocumentRoot "$local_root/html"
+Alias /civs "$local_root/html"
+<Directory "$local_root/html">
+    AllowOverride None
+    Options +MultiViews
+    Require all granted
+</Directory>
+
+ScriptAlias /cgi-bin/civs "$local_root/cgi-bin"
+<Directory "$local_root/cgi-bin">
+    AllowOverride None
+    Options +ExecCGI +MultiViews
+    Require all granted
+</Directory>
+EOF
+
+echo "Serving CIVS at http://localhost:$port/civs/"
+echo "Apache logs: $server_root/logs"
+exec "$httpd_bin" -f "$conf_file" -DFOREGROUND

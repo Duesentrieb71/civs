@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+port="${CIVS_PORT:-18080}"
+base_url="http://localhost:${port}"
+
+curl -fsS "$base_url/civs/" >/dev/null
+
+response="$(curl -fsS \
+  -X POST \
+  -F 'title=Local smoke poll' \
+  -F 'name=CIVS Local Tester' \
+  -F 'email_addr=tester@example.test' \
+  -F 'election_end=tomorrow' \
+  -F 'description=Local smoke test poll' \
+  -F $'choices=Alpha\r\nBeta\r\nGamma' \
+  -F 'num_winners=1' \
+  -F 'public=yes' \
+  -F 'no_IP_check=yes' \
+  "$base_url/cgi-bin/civs/create_election.pl")"
+
+if ! grep -q 'Poll created' <<<"$response"; then
+  echo "Smoke poll creation did not return the expected page." >&2
+  exit 1
+fi
+
+control_url="$(grep -o 'http://localhost:[0-9][^"]*control.pl[^"]*' <<<"$response" | head -n 1 | sed 's/&amp;/\\&/g')"
+
+if [[ -z "$control_url" ]]; then
+  echo "Smoke poll creation did not expose a control URL." >&2
+  exit 1
+fi
+
+id="$(grep -o 'id=[^&]*' <<<"$control_url" | head -n 1 | cut -d= -f2)"
+key="$(grep -o 'key=[^&]*' <<<"$control_url" | head -n 1 | cut -d= -f2)"
+akey="$(grep -o 'akey=[^&]*' <<<"$control_url" | head -n 1 | cut -d= -f2)"
+
+start_response="$(curl -fsS \
+  -X POST \
+  -F "id=$id" \
+  -F "key=$key" \
+  -F "akey=$akey" \
+  "$base_url/cgi-bin/civs/start_election.pl")"
+
+if ! grep -qi 'started' <<<"$start_response"; then
+  echo "Smoke poll did not start successfully." >&2
+  exit 1
+fi
+
+vote_response="$(curl -fsS \
+  -X POST \
+  -F "id=$id" \
+  -F "akey=$akey" \
+  -F 'Vote=Submit ranking' \
+  -F 'C0=1' \
+  -F 'C1=2' \
+  -F 'C2=3' \
+  "$base_url/cgi-bin/civs/vote.pl")"
+
+if ! grep -qi 'successfully cast' <<<"$vote_response"; then
+  echo "Smoke ballot was not accepted." >&2
+  exit 1
+fi
+
+close_response="$(curl -fsS \
+  -X POST \
+  -F "id=$id" \
+  -F "key=$key" \
+  -F 'confirmation=close' \
+  "$base_url/cgi-bin/civs/close.pl")"
+
+if ! grep -qi 'ended' <<<"$close_response"; then
+  echo "Smoke poll did not close successfully." >&2
+  exit 1
+fi
+
+results_response="$(curl -fsS "$base_url/cgi-bin/civs/results.pl?id=$id")"
+
+if ! grep -q 'Local smoke poll' <<<"$results_response"; then
+  echo "Smoke results page did not include the poll title." >&2
+  exit 1
+fi
+
+echo "Smoke poll created."
+echo "Smoke poll started."
+echo "Smoke ballot accepted."
+echo "Smoke poll closed."
+echo "Results URL: $base_url/cgi-bin/civs/results.pl?id=$id"
+echo "Control URL: $control_url"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 id=`id -u`
 CHOWN=/usr/sbin/chown # default

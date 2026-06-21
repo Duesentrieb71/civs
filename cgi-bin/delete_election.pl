@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!@PERL@
 
 use strict;
 use warnings;
@@ -29,5 +29,4 @@ print p("Election $election_id deleted");
 Log "Election $election_id deleted";
 
 print end_html();
-
 

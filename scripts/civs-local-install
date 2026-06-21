@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+local_root="${CIVS_LOCAL_ROOT:-"$repo_root/.civs-local"}"
+port="${CIVS_PORT:-18080}"
+config_file="$local_root/civs-local.conf"
+
+mkdir -p "$local_root" "$local_root/html" "$local_root/cgi-bin" "$local_root/data"
+
+cat > "$config_file" <<EOF
+CIVSHOME='http://localhost:${port}/civs'
+PROTO=http
+THISHOST='localhost:${port}'
+SUPERVISOR='civs-local@example.test'
+AUTH_SENDER="\$SUPERVISOR"
+SMTP_HOST='localhost'
+SMTP_USE_SSL=0
+SMTP_STARTTLS=0
+SMTP_PORT=2525
+SMTP_AUTH_USER=''
+SMTP_AUTH_PASSWD=''
+PERL='$(command -v perl)'
+HTMLDIR='$local_root/html'
+CGIBINDIR='$local_root/cgi-bin'
+CIVSDATADIR='$local_root/data'
+CIVSBINURL='/cgi-bin/civs'
+CIVSURL='/civs'
+PERLEXT='.pl'
+ADDTOPATH=':$local_root/data'
+LOCALDEBUG=1
+FILTER_TAGS='yes'
+USING_ISA=''
+MAX_VOTER_ADD=1000
+MAX_CHOICES=100
+MAX_EMAIL_LOAD=5000
+MAX_IMAGE_SIZE=1000000
+MAX_UPLOAD_SIZE=1000000
+MAX_TEST_BALLOTS=200000
+SUGGESTION_BOX=''
+EN_SUFFIX='.en'
+UTF8_SUFFIX='.utf8'
+FIXUTF8=0
+ADMIN_KEY='local-dev-admin-key'
+LOG_HOME_VISITS=
+DONATE_URL=''
+WEB_USER='$(id -un)'
+WEB_GROUP='$(id -gn)'
+CHOWN='$(command -v chown)'
+CHGRP='$(command -v chgrp)'
+EMAIL_SALT="\$ADMIN_KEY"
+EOF
+
+cd "$repo_root"
+bash ./install-civs "$config_file"
+
+echo
+echo "CIVS installed under $local_root"
+echo "Start the local web UI with: scripts/civs-local-httpd"
