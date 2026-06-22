@@ -19,3 +19,6 @@ data
 .civs-local/
 config/*
 status.html
+
+# Nix direnv
+.direnv
