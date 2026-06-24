@@ -2,7 +2,8 @@
 set -euo pipefail
 
 port="${CIVS_PORT:-18080}"
-base_url="http://localhost:${port}"
+smoke_host="${CIVS_SMOKE_HOST:-127.0.0.1}"
+base_url="http://${smoke_host}:${port}"
 
 curl -fsS "$base_url/civs/" >/dev/null
 
@@ -24,7 +25,7 @@ if ! grep -q 'Poll created' <<<"$response"; then
   exit 1
 fi
 
-control_url="$(grep -o 'http://localhost:[0-9][^"]*control.pl[^"]*' <<<"$response" | head -n 1 | sed 's/&amp;/\\&/g')"
+control_url="$(grep -oE 'https?://[^"]*control[.]pl[^"]*' <<<"$response" | head -n 1 | sed 's/&amp;/\\&/g')"
 
 if [[ -z "$control_url" ]]; then
   echo "Smoke poll creation did not expose a control URL." >&2

@@ -4,52 +4,96 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 local_root="${CIVS_LOCAL_ROOT:-"$repo_root/.civs-local"}"
 port="${CIVS_PORT:-18080}"
+proto="${CIVS_PROTO:-http}"
+host="${CIVS_HOST:-localhost}"
+public_port="${CIVS_PUBLIC_PORT-$port}"
 config_file="$local_root/civs-local.conf"
 
 mkdir -p "$local_root" "$local_root/html" "$local_root/cgi-bin" "$local_root/data"
 
+read_secret() {
+  local value="${1:-}"
+  local file="${2:-}"
+  if [[ -n "$file" ]]; then
+    value="$(<"$file")"
+  fi
+  printf '%s' "$value"
+}
+
+shell_quote() {
+  printf '%q' "$1"
+}
+
+authority="$host"
+if [[ -n "$public_port" ]]; then
+  authority="$authority:$public_port"
+fi
+
+supervisor="$(read_secret "${CIVS_SUPERVISOR:-civs-local@example.test}" "${CIVS_SUPERVISOR_FILE:-}")"
+auth_sender="$(read_secret "${CIVS_AUTH_SENDER:-$supervisor}" "${CIVS_AUTH_SENDER_FILE:-}")"
+smtp_host="${CIVS_SMTP_HOST:-localhost}"
+smtp_use_ssl="${CIVS_SMTP_USE_SSL:-0}"
+smtp_starttls="${CIVS_SMTP_STARTTLS:-0}"
+smtp_port="${CIVS_SMTP_PORT:-2525}"
+smtp_timeout="${CIVS_SMTP_TIMEOUT:-30}"
+sendmail="$(read_secret "${CIVS_SENDMAIL:-}" "${CIVS_SENDMAIL_FILE:-}")"
+smtp_auth_user="$(read_secret "${CIVS_SMTP_AUTH_USER:-}" "${CIVS_SMTP_AUTH_USER_FILE:-}")"
+smtp_auth_passwd="$(read_secret "${CIVS_SMTP_AUTH_PASSWD:-}" "${CIVS_SMTP_AUTH_PASSWD_FILE:-}")"
+local_debug="${CIVS_LOCALDEBUG:-1}"
+admin_key="$(read_secret "${CIVS_ADMIN_KEY:-local-dev-admin-key}" "${CIVS_ADMIN_KEY_FILE:-}")"
+email_salt="$(read_secret "${CIVS_EMAIL_SALT:-$admin_key}" "${CIVS_EMAIL_SALT_FILE:-}")"
+web_user="${CIVS_WEB_USER:-$(id -un)}"
+web_group="${CIVS_WEB_GROUP:-$(id -gn)}"
+
+if [[ -n "${CIVS_PRIVATE_HOST_ID_FILE:-}" ]]; then
+  install -m 600 "$CIVS_PRIVATE_HOST_ID_FILE" "$local_root/data/private_host_id"
+fi
+
 cat > "$config_file" <<EOF
-CIVSHOME='http://localhost:${port}/civs'
-PROTO=http
-THISHOST='localhost:${port}'
-SUPERVISOR='civs-local@example.test'
-AUTH_SENDER="\$SUPERVISOR"
-SMTP_HOST='localhost'
-SMTP_USE_SSL=0
-SMTP_STARTTLS=0
-SMTP_PORT=2525
-SMTP_AUTH_USER=''
-SMTP_AUTH_PASSWD=''
-PERL='$(command -v perl)'
-HTMLDIR='$local_root/html'
-CGIBINDIR='$local_root/cgi-bin'
-CIVSDATADIR='$local_root/data'
-CIVSBINURL='/cgi-bin/civs'
-CIVSURL='/civs'
-PERLEXT='.pl'
-ADDTOPATH=':$local_root/data'
-LOCALDEBUG=1
-FILTER_TAGS='yes'
-USING_ISA=''
+CIVSHOME=$(shell_quote "${proto}://${authority}/civs")
+PROTO=$(shell_quote "$proto")
+THISHOST=$(shell_quote "$authority")
+SUPERVISOR=$(shell_quote "$supervisor")
+AUTH_SENDER=$(shell_quote "$auth_sender")
+SMTP_HOST=$(shell_quote "$smtp_host")
+SMTP_USE_SSL=$smtp_use_ssl
+SMTP_STARTTLS=$smtp_starttls
+SMTP_PORT=$smtp_port
+SMTP_TIMEOUT=$smtp_timeout
+SENDMAIL=$(shell_quote "$sendmail")
+SMTP_AUTH_USER=$(shell_quote "$smtp_auth_user")
+SMTP_AUTH_PASSWD=$(shell_quote "$smtp_auth_passwd")
+PERL=$(shell_quote "$(command -v perl)")
+HTMLDIR=$(shell_quote "$local_root/html")
+CGIBINDIR=$(shell_quote "$local_root/cgi-bin")
+CIVSDATADIR=$(shell_quote "$local_root/data")
+CIVSBINURL=$(shell_quote "/cgi-bin/civs")
+CIVSURL=$(shell_quote "/civs")
+PERLEXT=$(shell_quote ".pl")
+ADDTOPATH=$(shell_quote ":$local_root/data")
+LOCALDEBUG=$local_debug
+FILTER_TAGS=$(shell_quote "yes")
+USING_ISA=$(shell_quote "")
 MAX_VOTER_ADD=1000
 MAX_CHOICES=100
 MAX_EMAIL_LOAD=5000
 MAX_IMAGE_SIZE=1000000
 MAX_UPLOAD_SIZE=1000000
 MAX_TEST_BALLOTS=200000
-SUGGESTION_BOX=''
-EN_SUFFIX='.en'
-UTF8_SUFFIX='.utf8'
+SUGGESTION_BOX=$(shell_quote "")
+EN_SUFFIX=$(shell_quote ".en")
+UTF8_SUFFIX=$(shell_quote ".utf8")
 FIXUTF8=0
-ADMIN_KEY='local-dev-admin-key'
+ADMIN_KEY=$(shell_quote "$admin_key")
 LOG_HOME_VISITS=
-DONATE_URL=''
-WEB_USER='$(id -un)'
-WEB_GROUP='$(id -gn)'
-CHOWN='$(command -v chown)'
-CHGRP='$(command -v chgrp)'
-EMAIL_SALT="\$ADMIN_KEY"
+DONATE_URL=$(shell_quote "")
+WEB_USER=$(shell_quote "$web_user")
+WEB_GROUP=$(shell_quote "$web_group")
+CHOWN=$(shell_quote "$(command -v chown)")
+CHGRP=$(shell_quote "$(command -v chgrp)")
+EMAIL_SALT=$(shell_quote "$email_salt")
 EOF
+chmod 600 "$config_file"
 
 cd "$repo_root"
 bash ./install-civs "$config_file"

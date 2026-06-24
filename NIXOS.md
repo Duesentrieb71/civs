@@ -29,6 +29,34 @@ CIVS_PORT=19090 scripts/civs-local-install
 CIVS_PORT=19090 scripts/civs-local-httpd
 ```
 
+To access the local instance from another machine, set the public host used in
+CIVS links and the address Apache should bind to:
+
+```sh
+CIVS_HOST=192.168.188.106 CIVS_LISTEN_ADDR=0.0.0.0 scripts/civs-local-install
+CIVS_HOST=192.168.188.106 CIVS_LISTEN_ADDR=0.0.0.0 scripts/civs-local-httpd
+```
+
+Use `CIVS_HTTPD_FOREGROUND=0` with `scripts/civs-local-httpd` to start Apache
+as a background daemon instead of foregrounding it in the terminal.
+
+When CIVS is behind an HTTPS reverse proxy on the default HTTPS port, keep the
+backend on `18080` but omit the public URL port:
+
+```sh
+CIVS_HOST=wahl.ksat-stuttgart.de CIVS_PROTO=https CIVS_PUBLIC_PORT= \
+  CIVS_LISTEN_ADDR=0.0.0.0 scripts/civs-local-install
+```
+
+The local Apache helper intentionally uses `mpm_prefork` with `mod_cgi`.
+CIVS is a classic CGI application, and its Perl SMTP/TLS path can hang when a
+CGI child is forked from Apache's threaded `mpm_event` worker.
+
+For production mail delivery, prefer setting `CIVS_SENDMAIL` to a
+sendmail-compatible wrapper such as `msmtp` instead of letting CIVS use
+`Net::SMTP` directly. The direct Perl TLS path can time out in CGI, while an
+external mailer keeps SMTP/TLS handling in a separate process managed by Nix.
+
 With the server running, this CLI smoke test creates a public poll, starts it,
 casts one ballot, closes it, and fetches results:
 

@@ -31,8 +31,14 @@ use Socket;
 
 # Non-exported package globals
 our $smtp;
+our $sendmail_sender;
+our @sendmail_recipients;
+our $sendmail_data;
 our $verbose;
 our $use_ssl = @SMTP_USE_SSL@;
+our $smtp_timeout = @SMTP_TIMEOUT@;
+our $smtp_stage = 'not started';
+our $sendmail_path = '@SENDMAIL@';
 
 &init;
 
@@ -214,7 +220,9 @@ sub SendBytes {
     if ($verbose || $local_debug) {
         print CGI::escapeHTML($s)."\n"; STDOUT->flush();
     }
-    if (!($local_debug)) {
+    if (UseSendmail()) {
+        $sendmail_data .= $s;
+    } elsif (!($local_debug)) {
         $smtp->datasend($s);
     }
 }
@@ -226,6 +234,15 @@ sub Send {
     }
 }
 
+sub MailLog {
+    my ($msg) = @_;
+    eval { Log("SMTP $msg") };
+}
+
+sub UseSendmail {
+    return $sendmail_path ne '';
+}
+
 # Set up a connection to the SMTP server so email can be sent
 # No actual connection is created in local debug mode.
 sub OpenMail {
@@ -233,37 +250,85 @@ sub OpenMail {
 	print "<pre>\r\n";
         return 1
     }
-    $smtp = Net::SMTP->new('@SMTP_HOST@',
-       Hello => '@THISHOST@',
-       SSL => @SMTP_USE_SSL@,
-       Port => @SMTP_PORT@,
-       Timeout => 5
-    );
-    if (!defined($smtp)) {
-        print $@, $cr;
+    if (UseSendmail()) {
+        $sendmail_sender = undef;
+        @sendmail_recipients = ();
+        $sendmail_data = '';
+        MailLog("sendmail transport ready");
+        return 1
+    }
+    my $ok = eval {
+        local $SIG{ALRM} = sub { die "SMTP timeout during $smtp_stage\n" };
+        alarm $smtp_timeout;
+
+        $smtp_stage = 'connect';
+        MailLog("connect to @SMTP_HOST@:@SMTP_PORT@");
+        $smtp = Net::SMTP->new('@SMTP_HOST@',
+           Hello => '@THISHOST@',
+           SSL => @SMTP_USE_SSL@,
+           Port => @SMTP_PORT@,
+           Timeout => $smtp_timeout
+        );
+        my $mail_ok = 1;
+        if (!defined($smtp)) {
+            print $@, $cr;
+            MailLog("connect failed");
+            $mail_ok = 0
+        }
+
+        if ($mail_ok && @SMTP_STARTTLS@) {
+            $smtp_stage = 'STARTTLS';
+            MailLog("STARTTLS");
+            if (!$smtp->starttls(
+                    SSL_verify_mode => SSL_VERIFY_NONE,
+                    Timeout => $smtp_timeout
+                )) {
+                print 'STARTTLS failed:', $smtp->message(), $cr;
+                MailLog("STARTTLS failed");
+                $mail_ok = 0
+            }
+        }
+
+        if ($mail_ok && '@SMTP_AUTH_USER@' ne '') {
+            $smtp_stage = 'authentication';
+            MailLog("authentication for @SMTP_AUTH_USER@");
+            if (!$smtp->auth('@SMTP_AUTH_USER@', '@SMTP_AUTH_PASSWD@')) {
+                print 'Authentication for @SMTP_AUTH_USER@ failed.',
+                   $smtp->message(), $cr;
+                MailLog("authentication failed for @SMTP_AUTH_USER@");
+                $mail_ok = 0
+            }
+        }
+
+        alarm 0;
+        if ($mail_ok) {
+            $smtp_stage = 'ready';
+            MailLog("ready");
+        }
+        $mail_ok
+    };
+
+    my $err = $@;
+    alarm 0;
+    if ($err) {
+        if ($err =~ /^SMTP timeout/) {
+            print "SMTP timed out during $smtp_stage", $cr;
+            MailLog("timeout during $smtp_stage");
+        } else {
+            print "SMTP failed during $smtp_stage", $cr;
+            MailLog("failed during $smtp_stage: $err");
+        }
         return 0
     }
-    # print 'Connected to: ', $smtp->domain, $cr;
-    if (@SMTP_STARTTLS@) {
-        if (!$smtp->starttls(SSL_verify_mode => SSL_VERIFY_NONE)) {
-            print 'STARTTLS failed:', $smtp->message(), $cr;
-            return 0
-        }
-    }
-    if ('@SMTP_AUTH_USER@' ne '') {
-        if (!$smtp->auth('@SMTP_AUTH_USER@', '@SMTP_AUTH_PASSWD@')) {
-            print 'Authentication for @SMTP_AUTH_USER@ failed.',
-               $smtp->message(), $cr;
-            return 0
-        }
-    }
-    1
+    return $ok
 }
 
 sub MailFrom {
     (my $sender) = @_;
     if ($local_debug) {
         print "From ", $sender, $cr;
+    } elsif (UseSendmail()) {
+        $sendmail_sender = $sender;
     } elsif (!$smtp->mail($sender)) {
         print "MailFrom:", $smtp->message(), $cr;
         return 0
@@ -274,6 +339,8 @@ sub MailFrom {
 sub MailTo {
     if ($local_debug) {
         print "To ", $_[0], $cr;
+    } elsif (UseSendmail()) {
+        push @sendmail_recipients, @_;
     } elsif (!$smtp->recipient(@_)) {
         print "To: ", $smtp->message(), $cr;
         return 0
@@ -284,6 +351,8 @@ sub MailTo {
 sub StartMailData {
     if ($local_debug) {
         print "--- Mail data begins ---", $cr;
+    } elsif (UseSendmail()) {
+        $sendmail_data = '';
     } elsif (!$smtp->data()) {
         print "StartMailData:", $smtp->message(), $cr;
         return 0
@@ -293,6 +362,8 @@ sub StartMailData {
 sub EndMailData {
     if ($local_debug) {
         print "--- Mail data ends ---", $cr;
+    } elsif (UseSendmail()) {
+        return 1
     } elsif (!$smtp->dataend()) {
         print "EndMailData: ", $smtp->message(), $cr;
         return 0
@@ -304,6 +375,33 @@ sub EndMailData {
 sub CloseMail {
     if ($local_debug) {
 	print '</pre>';
+    } elsif (UseSendmail()) {
+        if (!defined($sendmail_sender) || @sendmail_recipients == 0) {
+            print "sendmail: missing envelope sender or recipient", $cr;
+            MailLog("sendmail missing envelope sender or recipient");
+            return 0
+        }
+        MailLog("sendmail invoke");
+        my $ok = eval {
+            local $SIG{ALRM} = sub { die "sendmail timeout\n" };
+            alarm $smtp_timeout;
+            open(my $mail, "|-", $sendmail_path, "-f", $sendmail_sender,
+                 @sendmail_recipients)
+                or die "open failed: $!";
+            binmode $mail, ':raw';
+            print $mail $sendmail_data;
+            close($mail) or die "sendmail exited with status $?";
+            alarm 0;
+            1
+        };
+        my $err = $@;
+        alarm 0;
+        if (!$ok) {
+            print "sendmail failed", $cr;
+            MailLog("sendmail failed: $err");
+            return 0
+        }
+        MailLog("sendmail complete");
     } else {
         $smtp->quit();
     }

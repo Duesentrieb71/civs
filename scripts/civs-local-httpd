@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 local_root="${CIVS_LOCAL_ROOT:-"$repo_root/.civs-local"}"
 port="${CIVS_PORT:-18080}"
+host="${CIVS_HOST:-localhost}"
+listen_addr="${CIVS_LISTEN_ADDR:-127.0.0.1}"
 server_root="$local_root/apache"
 conf_file="$server_root/httpd.conf"
 
@@ -21,11 +23,13 @@ mkdir -p "$server_root" "$server_root/logs" "$server_root/run"
 cat > "$conf_file" <<EOF
 ServerRoot "$server_root"
 PidFile "$server_root/run/httpd.pid"
-Listen 127.0.0.1:$port
-ServerName localhost
+Listen $listen_addr:$port
+ServerName $host
 ServerAdmin civs-local@example.test
 
-LoadModule mpm_event_module "$modules_dir/mod_mpm_event.so"
+# CIVS uses classic CGI scripts. Use prefork so CGI processes are forked from
+# a single-threaded worker; TLS libraries can hang when forked from mpm_event.
+LoadModule mpm_prefork_module "$modules_dir/mod_mpm_prefork.so"
 LoadModule unixd_module "$modules_dir/mod_unixd.so"
 LoadModule authn_core_module "$modules_dir/mod_authn_core.so"
 LoadModule authz_core_module "$modules_dir/mod_authz_core.so"
@@ -85,6 +89,12 @@ ScriptAlias /cgi-bin/civs "$local_root/cgi-bin"
 </Directory>
 EOF
 
-echo "Serving CIVS at http://localhost:$port/civs/"
+echo "Serving CIVS at http://$host:$port/civs/"
+echo "Listening on $listen_addr:$port"
 echo "Apache logs: $server_root/logs"
+
+if [[ "${CIVS_HTTPD_FOREGROUND:-1}" == "0" ]]; then
+  exec "$httpd_bin" -f "$conf_file" -k start
+fi
+
 exec "$httpd_bin" -f "$conf_file" -DFOREGROUND

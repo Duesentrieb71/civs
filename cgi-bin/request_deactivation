@@ -64,7 +64,7 @@ if (!defined($code)) {
         if (!OpenMail) {
             print p("Could not connect to SMTP server", tt('@SMTP_HOST@'));
             Log("Failed to send deactivation code");
-            return;
+            exit 0;
         }
 
 

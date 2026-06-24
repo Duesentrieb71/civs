@@ -25,6 +25,8 @@ fi
 settings_file="$1"
 
 . "$settings_file" || exit 1
+: "${SENDMAIL:=}"
+: "${SMTP_TIMEOUT:=30}"
 
 echo "Read settings file."
 
@@ -84,11 +86,13 @@ SubstituteFile() {
          -e 's|@PERL@|'$PERL'|'						      \
          -e 's|@PERLEXT@|'$PERLEXT'|'					      \
          -e 's|@PROTO@|'$PROTO'|'					      \
+         -e 's|@SENDMAIL@|'$SENDMAIL'|'				      \
          -e 's|@SMTP_AUTH_PASSWD@|'$SMTP_AUTH_PASSWD'|'			      \
          -e 's|@SMTP_AUTH_USER@|'$SMTP_AUTH_USER'|'			      \
          -e 's|@SMTP_HOST@|'$SMTP_HOST'|'				      \
          -e 's|@SMTP_PORT@|'$SMTP_PORT'|'				      \
          -e 's|@SMTP_STARTTLS@|'$SMTP_STARTTLS'|'			      \
+         -e 's|@SMTP_TIMEOUT@|'$SMTP_TIMEOUT'|'			      \
          -e 's|@SMTP_USE_SSL@|'$SMTP_USE_SSL'|'				      \
          -e 's|@SUGGESTION_BOX@|'$SUGGESTION_BOX'|'			      \
          -e 's|@SUPERVISOR@|'$SUPERVISOR'|'				      \
@@ -253,6 +257,7 @@ fi
 chmod 600 $CIVSDATADIR/nonce_seed
 chmod 644 $CIVSDATADIR/log $CIVSDATADIR/cgi-log $CIVSDATADIR/global_lock      \
           $CIVSDATADIR/email-control.txt
+chmod 600 "$settings_file"
 
 echo "Installing executables"
 
