@@ -46,15 +46,68 @@ sub CleanCode {
     return $code;
 }
 
+sub CheckActivationRateLimit {
+    my $minute_limit = @ACTIVATION_RATE_MINUTE@;
+    my $day_limit = @ACTIVATION_RATE_DAY@;
+    return 1 if ($minute_limit <= 0 && $day_limit <= 0);
+
+    my $now = time;
+    my $rate_file = "@CIVSDATADIR@/activation-rate.log";
+    my @events = ();
+
+    if (open(my $in, "<", $rate_file)) {
+        while (my $line = <$in>) {
+            chomp($line);
+            if ($line =~ /^\d+$/ && $line >= $now - 86400) {
+                push @events, $line;
+            }
+        }
+        close($in);
+    }
+
+    my $minute_count = 0;
+    for my $event (@events) {
+        if ($event >= $now - 60) {
+            $minute_count++;
+        }
+    }
+
+    my $day_count = scalar @events;
+    if (($minute_limit > 0 && $minute_count >= $minute_limit) ||
+        ($day_limit > 0 && $day_count >= $day_limit)) {
+        Log("Activation request rate limit exceeded minute=$minute_count day=$day_count");
+        return 0;
+    }
+
+    push @events, $now;
+    if (open(my $out, ">", $rate_file)) {
+        for my $event (@events) {
+            print $out $event, "\n";
+        }
+        close($out);
+    } else {
+        Log("Could not update activation rate limit file $rate_file");
+    }
+
+    return 1;
+}
+
 if (!defined($code)) {
 # This is a request to send a code
 
-    &ReleaseGlobalLock;
-
     if ($opted_out) {
+        &ReleaseGlobalLock;
         print start_html(), p($tx->cant_send_email), end_html();
         exit 0;
     }
+
+    if (!CheckActivationRateLimit()) {
+        &ReleaseGlobalLock;
+        print "Activation email rate limit exceeded. Please try again later.";
+        exit 0;
+    }
+
+    &ReleaseGlobalLock;
 
     my $code = &ActivationCode($address);
 

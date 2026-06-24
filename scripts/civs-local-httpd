@@ -6,6 +6,7 @@ local_root="${CIVS_LOCAL_ROOT:-"$repo_root/.civs-local"}"
 port="${CIVS_PORT:-18080}"
 host="${CIVS_HOST:-localhost}"
 listen_addr="${CIVS_LISTEN_ADDR:-127.0.0.1}"
+admin_htpasswd_file="${CIVS_ADMIN_HTPASSWD_FILE:-}"
 server_root="$local_root/apache"
 conf_file="$server_root/httpd.conf"
 
@@ -20,6 +21,20 @@ modules_dir="$httpd_prefix/modules"
 
 mkdir -p "$server_root" "$server_root/logs" "$server_root/run"
 
+admin_auth_block=""
+if [[ -n "$admin_htpasswd_file" ]]; then
+  admin_auth_block=$(cat <<EOF_AUTH
+<LocationMatch "^/(civs/civs_create\\.html.*|cgi-bin/civs/(add_voters|clear_caches|close|control|create_election|delete_election|download_ballots|edit_poll|publicize_election|remove_defunct_elections|remove_writein|resend_link|start_election|status|upload_ballots)\\.pl)$">
+    AuthType Basic
+    AuthName "CIVS poll administration"
+    AuthBasicProvider file
+    AuthUserFile "$admin_htpasswd_file"
+    Require valid-user
+</LocationMatch>
+EOF_AUTH
+)
+fi
+
 cat > "$conf_file" <<EOF
 ServerRoot "$server_root"
 PidFile "$server_root/run/httpd.pid"
@@ -32,6 +47,8 @@ ServerAdmin civs-local@example.test
 LoadModule mpm_prefork_module "$modules_dir/mod_mpm_prefork.so"
 LoadModule unixd_module "$modules_dir/mod_unixd.so"
 LoadModule authn_core_module "$modules_dir/mod_authn_core.so"
+LoadModule authn_file_module "$modules_dir/mod_authn_file.so"
+LoadModule auth_basic_module "$modules_dir/mod_auth_basic.so"
 LoadModule authz_core_module "$modules_dir/mod_authz_core.so"
 LoadModule authz_host_module "$modules_dir/mod_authz_host.so"
 LoadModule authz_user_module "$modules_dir/mod_authz_user.so"
@@ -87,6 +104,8 @@ ScriptAlias /cgi-bin/civs "$local_root/cgi-bin"
     Options +ExecCGI +MultiViews
     Require all granted
 </Directory>
+
+$admin_auth_block
 EOF
 
 echo "Serving CIVS at http://$host:$port/civs/"

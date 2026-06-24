@@ -108,6 +108,8 @@ A production deployment needs these secrets:
 ```yaml
 civs:
   admin-key: "random hex string"
+  admin-auth-user: "admin"
+  admin-auth-password: "strong password for poll creation/control"
   email-salt: "random hex string"
   private-host-id: "random hex string"
   supervisor: "noreply@example.org"
@@ -156,6 +158,24 @@ Generate random values with, for example:
 openssl rand -hex 32
 ```
 
+To edit an existing secret file on the VM:
+
+```sh
+cd /home/ksat/nixos-configs
+sudo env \
+  EDITOR=nano \
+  SOPS_AGE_KEY_CMD="ssh-to-age -private-key -i /etc/ssh/ssh_host_ed25519_key" \
+  sops secrets/base-vm.yaml
+```
+
+Add or update:
+
+```yaml
+civs:
+  admin-auth-user: "admin"
+  admin-auth-password: "replace with a strong password"
+```
+
 ## NixOS Module
 
 Create a module such as `hosts/base-vm/civs.nix` in your NixOS config and
@@ -180,6 +200,7 @@ let
   civsReverseProxyAddress = "192.0.2.5";
   civsSource = "/srv/civs";
   civsStateDir = "/var/lib/civs";
+  civsAdminHtpasswd = "${civsStateDir}/apache/civs-admin.htpasswd";
 
   htmlTagFilter = pkgs.perlPackages.buildPerlPackage {
     pname = "HTML-TagFilter";
@@ -253,6 +274,14 @@ let
     export CIVS_SMTP_PORT=465
     export CIVS_SMTP_USE_SSL=1
     export CIVS_SMTP_STARTTLS=0
+    export CIVS_ACTIVATION_RATE_MINUTE=100
+    export CIVS_ACTIVATION_RATE_DAY=500
+
+    admin_auth_user="$(${pkgs.coreutils}/bin/cat ${civsSecret "admin-auth-user"})"
+    mkdir -p ${civsStateDir}/apache
+    ${pkgs.apacheHttpd}/bin/htpasswd -Bbi -c ${civsAdminHtpasswd} "$admin_auth_user" < ${civsSecret "admin-auth-password"}
+    chmod 600 ${civsAdminHtpasswd}
+    export CIVS_ADMIN_HTPASSWD_FILE=${civsAdminHtpasswd}
 
     export CIVS_WEB_USER=civs
     export CIVS_WEB_GROUP=civs
@@ -283,6 +312,8 @@ in
   sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
   sops.secrets = {
     "civs/admin-key" = { owner = "civs"; group = "civs"; mode = "0400"; };
+    "civs/admin-auth-user" = { owner = "civs"; group = "civs"; mode = "0400"; };
+    "civs/admin-auth-password" = { owner = "civs"; group = "civs"; mode = "0400"; };
     "civs/email-salt" = { owner = "civs"; group = "civs"; mode = "0400"; };
     "civs/private-host-id" = { owner = "civs"; group = "civs"; mode = "0400"; };
     "civs/supervisor" = { owner = "civs"; group = "civs"; mode = "0400"; };

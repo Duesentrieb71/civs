@@ -25,6 +25,8 @@ fi
 settings_file="$1"
 
 . "$settings_file" || exit 1
+: "${ACTIVATION_RATE_DAY:=500}"
+: "${ACTIVATION_RATE_MINUTE:=100}"
 : "${SENDMAIL:=}"
 : "${SMTP_TIMEOUT:=30}"
 
@@ -64,6 +66,8 @@ SubstituteFile() {
     fi
     sed									      \
          -e 's|@ADDTOPATH@|'$ADDTOPATH'|'				      \
+         -e 's|@ACTIVATION_RATE_DAY@|'$ACTIVATION_RATE_DAY'|'	      \
+         -e 's|@ACTIVATION_RATE_MINUTE@|'$ACTIVATION_RATE_MINUTE'|'     \
          -e 's|@ADMIN_KEY@|'$ADMIN_KEY'|'				      \
          -e 's|@AUTH_SENDER@|'$AUTH_SENDER'|'				      \
          -e 's|@CGIBINDIR@|'"$CGIBINDIR"'|'				      \
