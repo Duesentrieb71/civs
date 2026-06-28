@@ -243,6 +243,44 @@ sub UseSendmail {
     return $sendmail_path ne '';
 }
 
+sub ResetSendmailMessage {
+    $sendmail_sender = undef;
+    @sendmail_recipients = ();
+    $sendmail_data = '';
+}
+
+sub SendmailEndMessage {
+    if (!defined($sendmail_sender) || @sendmail_recipients == 0) {
+        print "sendmail: missing envelope sender or recipient", $cr;
+        MailLog("sendmail missing envelope sender or recipient");
+        return 0;
+    }
+
+    MailLog("sendmail invoke");
+    my $ok = eval {
+        local $SIG{ALRM} = sub { die "sendmail timeout\n" };
+        alarm $smtp_timeout;
+        open(my $mail, "|-", $sendmail_path, "-f", $sendmail_sender,
+             @sendmail_recipients)
+            or die "open failed: $!";
+        binmode $mail, ':raw';
+        print $mail $sendmail_data;
+        close($mail) or die "sendmail exited with status $?";
+        alarm 0;
+        1
+    };
+    my $err = $@;
+    alarm 0;
+    ResetSendmailMessage();
+    if (!$ok) {
+        print "sendmail failed", $cr;
+        MailLog("sendmail failed: $err");
+        return 0;
+    }
+    MailLog("sendmail complete");
+    return 1;
+}
+
 # Set up a connection to the SMTP server so email can be sent
 # No actual connection is created in local debug mode.
 sub OpenMail {
@@ -251,9 +289,7 @@ sub OpenMail {
         return 1
     }
     if (UseSendmail()) {
-        $sendmail_sender = undef;
-        @sendmail_recipients = ();
-        $sendmail_data = '';
+        ResetSendmailMessage();
         MailLog("sendmail transport ready");
         return 1
     }
@@ -328,6 +364,7 @@ sub MailFrom {
     if ($local_debug) {
         print "From ", $sender, $cr;
     } elsif (UseSendmail()) {
+        ResetSendmailMessage();
         $sendmail_sender = $sender;
     } elsif (!$smtp->mail($sender)) {
         print "MailFrom:", $smtp->message(), $cr;
@@ -363,7 +400,7 @@ sub EndMailData {
     if ($local_debug) {
         print "--- Mail data ends ---", $cr;
     } elsif (UseSendmail()) {
-        return 1
+        return SendmailEndMessage()
     } elsif (!$smtp->dataend()) {
         print "EndMailData: ", $smtp->message(), $cr;
         return 0
@@ -376,32 +413,7 @@ sub CloseMail {
     if ($local_debug) {
 	print '</pre>';
     } elsif (UseSendmail()) {
-        if (!defined($sendmail_sender) || @sendmail_recipients == 0) {
-            print "sendmail: missing envelope sender or recipient", $cr;
-            MailLog("sendmail missing envelope sender or recipient");
-            return 0
-        }
-        MailLog("sendmail invoke");
-        my $ok = eval {
-            local $SIG{ALRM} = sub { die "sendmail timeout\n" };
-            alarm $smtp_timeout;
-            open(my $mail, "|-", $sendmail_path, "-f", $sendmail_sender,
-                 @sendmail_recipients)
-                or die "open failed: $!";
-            binmode $mail, ':raw';
-            print $mail $sendmail_data;
-            close($mail) or die "sendmail exited with status $?";
-            alarm 0;
-            1
-        };
-        my $err = $@;
-        alarm 0;
-        if (!$ok) {
-            print "sendmail failed", $cr;
-            MailLog("sendmail failed: $err");
-            return 0
-        }
-        MailLog("sendmail complete");
+        ResetSendmailMessage();
     } else {
         $smtp->quit();
     }
